@@ -7,6 +7,7 @@ from torch.nn import ParameterDict
 from torch_geometric.typing import Adj, EdgeType, NodeType, SparseTensor
 from torch_geometric.utils import is_sparse, to_edge_index
 from torch_geometric.utils.num_nodes import maybe_num_nodes_dict
+from torch_geometric.nn.parameter_dict import ParameterDict
 
 
 def group_hetero_graph(
@@ -84,8 +85,9 @@ def construct_bipartite_edge_index(
     src_offset_dict: Dict[EdgeType, int],
     dst_offset_dict: Dict[NodeType, int],
     edge_attr_dict: Optional[Dict[EdgeType, Tensor]] = None,
+    edge_weight_dict: Optional[Dict[EdgeType, Tensor]] = None,
     num_nodes: Optional[int] = None,
-) -> Tuple[Adj, Optional[Tensor]]:
+) -> Tuple[Adj, Optional[Tensor], Optional[Tensor]]:
     """Constructs a tensor of edge indices by concatenating edge indices
     for each edge type. The edge indices are increased by the offset of the
     source and destination nodes.
@@ -109,6 +111,7 @@ def construct_bipartite_edge_index(
     is_sparse_tensor = False
     edge_indices: List[Tensor] = []
     edge_attrs: List[Tensor] = []
+    edge_weights: List[Tensor] = []
     for edge_type, src_offset in src_offset_dict.items():
         edge_index = edge_index_dict[edge_type]
         dst_offset = dst_offset_dict[edge_type[-1]]
@@ -133,19 +136,30 @@ def construct_bipartite_edge_index(
             if value.size(0) != edge_index.size(1):
                 value = value.expand(edge_index.size(1), -1)
             edge_attrs.append(value)
+        if edge_weight_dict is not None:
+            if isinstance(edge_weight_dict, ParameterDict):
+                value = edge_weight_dict['__'.join(edge_type)]
+            else:
+                value = edge_weight_dict[edge_type]
+            if value.size(0) != edge_index.size(1):
+                value = value.expand(edge_index.size(1), -1)
+            edge_weights.append(value)
 
     edge_index = torch.cat(edge_indices, dim=1)
 
     edge_attr: Optional[Tensor] = None
     if edge_attr_dict is not None:
         edge_attr = torch.cat(edge_attrs, dim=0)
+    edge_weight: Optional[Tensor] = None
+    if edge_weight_dict is not None:
+        edge_weight = torch.cat(edge_weights, dim=0)
 
     if is_sparse_tensor:
         edge_index = SparseTensor(
             row=edge_index[1],
             col=edge_index[0],
-            value=edge_attr,
+            value=edge_weight,
             sparse_sizes=(num_nodes, num_nodes),
         )
 
-    return edge_index, edge_attr
+    return edge_index, edge_weight, edge_attr

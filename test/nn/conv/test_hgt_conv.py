@@ -9,17 +9,19 @@ from torch_geometric.typing import SparseTensor
 from torch_geometric.utils import coalesce, to_torch_csc_tensor
 
 
-@withPackage('torch>=1.12.0')  # TODO Investigate error
+@withPackage("torch>=1.12.0")  # TODO Investigate error
 def test_hgt_conv_same_dimensions():
     x_dict = {
-        'author': torch.randn(4, 16),
-        'paper': torch.randn(6, 16),
+        "author": torch.randn(3, 16),
+        "paper": torch.randn(6, 16),
     }
-    edge_index = coalesce(get_random_edge_index(4, 6, num_edges=20))
-
+    edge_index = torch.tensor([[2, 0], 
+                               [5, 5]], dtype=int)
+    # coalesce(get_random_edge_index(3, 6, num_edges=2))
+    print(edge_index)
     edge_index_dict = {
-        ('author', 'writes', 'paper'): edge_index,
-        ('paper', 'written_by', 'author'): edge_index.flip([0]),
+        ("author", "writes", "paper"): edge_index,
+        ("paper", "written_by", "author"): edge_index.flip([0]),
     }
 
     adj_t_dict1 = {}
@@ -33,11 +35,11 @@ def test_hgt_conv_same_dimensions():
     metadata = (list(x_dict.keys()), list(edge_index_dict.keys()))
 
     conv = HGTConv(16, 16, metadata, heads=2)
-    assert str(conv) == 'HGTConv(-1, 16, heads=2)'
+    assert str(conv) == "HGTConv(-1, 16, heads=2)"
     out_dict1 = conv(x_dict, edge_index_dict)
     assert len(out_dict1) == 2
-    assert out_dict1['author'].size() == (4, 16)
-    assert out_dict1['paper'].size() == (6, 16)
+    assert out_dict1["author"].size() == (3, 16)
+    assert out_dict1["paper"].size() == (6, 16)
 
     out_dict2 = conv(x_dict, adj_t_dict1)
     assert len(out_dict1) == len(out_dict2)
@@ -60,17 +62,17 @@ def test_hgt_conv_same_dimensions():
     # allows indexing `ParameterDict` mappings :(
 
 
-@withPackage('torch>=1.12.0')  # TODO Investigate error
+@withPackage("torch>=1.12.0")  # TODO Investigate error
 def test_hgt_conv_different_dimensions():
     x_dict = {
-        'author': torch.randn(4, 16),
-        'paper': torch.randn(6, 32),
+        "author": torch.randn(4, 16),
+        "paper": torch.randn(6, 32),
     }
     edge_index = coalesce(get_random_edge_index(4, 6, num_edges=20))
 
     edge_index_dict = {
-        ('author', 'writes', 'paper'): edge_index,
-        ('paper', 'written_by', 'author'): edge_index.flip([0]),
+        ("author", "writes", "paper"): edge_index,
+        ("paper", "written_by", "author"): edge_index.flip([0]),
     }
 
     adj_t_dict1 = {}
@@ -83,15 +85,17 @@ def test_hgt_conv_different_dimensions():
 
     metadata = (list(x_dict.keys()), list(edge_index_dict.keys()))
 
-    conv = HGTConv(in_channels={
-        'author': 16,
-        'paper': 32
-    }, out_channels=32, metadata=metadata, heads=2)
-    assert str(conv) == 'HGTConv(-1, 32, heads=2)'
+    conv = HGTConv(
+        in_channels={"author": 16, "paper": 32},
+        out_channels=32,
+        metadata=metadata,
+        heads=2,
+    )
+    assert str(conv) == "HGTConv(-1, 32, heads=2)"
     out_dict1 = conv(x_dict, edge_index_dict)
     assert len(out_dict1) == 2
-    assert out_dict1['author'].size() == (4, 32)
-    assert out_dict1['paper'].size() == (6, 32)
+    assert out_dict1["author"].size() == (4, 32)
+    assert out_dict1["paper"].size() == (6, 32)
 
     out_dict2 = conv(x_dict, adj_t_dict1)
     assert len(out_dict1) == len(out_dict2)
@@ -111,17 +115,17 @@ def test_hgt_conv_different_dimensions():
             assert torch.allclose(out_dict1[key], out_dict3[key], atol=1e-6)
 
 
-@withPackage('torch>=1.12.0')  # TODO Investigate error
+@withPackage("torch>=1.12.0")  # TODO Investigate error
 def test_hgt_conv_lazy():
     x_dict = {
-        'author': torch.randn(4, 16),
-        'paper': torch.randn(6, 32),
+        "author": torch.randn(4, 16),
+        "paper": torch.randn(6, 32),
     }
     edge_index = coalesce(get_random_edge_index(4, 6, num_edges=20))
 
     edge_index_dict = {
-        ('author', 'writes', 'paper'): edge_index,
-        ('paper', 'written_by', 'author'): edge_index.flip([0]),
+        ("author", "writes", "paper"): edge_index,
+        ("paper", "written_by", "author"): edge_index.flip([0]),
     }
 
     adj_t_dict1 = {}
@@ -135,11 +139,11 @@ def test_hgt_conv_lazy():
     metadata = (list(x_dict.keys()), list(edge_index_dict.keys()))
 
     conv = HGTConv(-1, 32, metadata, heads=2)
-    assert str(conv) == 'HGTConv(-1, 32, heads=2)'
+    assert str(conv) == "HGTConv(-1, 32, heads=2)"
     out_dict1 = conv(x_dict, edge_index_dict)
     assert len(out_dict1) == 2
-    assert out_dict1['author'].size() == (4, 32)
-    assert out_dict1['paper'].size() == (6, 32)
+    assert out_dict1["author"].size() == (4, 32)
+    assert out_dict1["paper"].size() == (6, 32)
 
     out_dict2 = conv(x_dict, adj_t_dict1)
     assert len(out_dict1) == len(out_dict2)
@@ -161,101 +165,102 @@ def test_hgt_conv_lazy():
 
 def test_hgt_conv_out_of_place():
     data = HeteroData()
-    data['author'].x = torch.randn(4, 16)
-    data['paper'].x = torch.randn(6, 32)
+    data["author"].x = torch.randn(4, 16)
+    data["paper"].x = torch.randn(6, 32)
 
     edge_index = coalesce(get_random_edge_index(4, 6, num_edges=20))
 
-    data['author', 'paper'].edge_index = edge_index
-    data['paper', 'author'].edge_index = edge_index.flip([0])
+    data["author", "paper"].edge_index = edge_index
+    data["paper", "author"].edge_index = edge_index.flip([0])
 
     conv = HGTConv(-1, 64, data.metadata(), heads=1)
 
     x_dict, edge_index_dict = data.x_dict, data.edge_index_dict
-    assert x_dict['author'].size() == (4, 16)
-    assert x_dict['paper'].size() == (6, 32)
+    assert x_dict["author"].size() == (4, 16)
+    assert x_dict["paper"].size() == (6, 32)
 
     _ = conv(x_dict, edge_index_dict)
 
-    assert x_dict['author'].size() == (4, 16)
-    assert x_dict['paper'].size() == (6, 32)
+    assert x_dict["author"].size() == (4, 16)
+    assert x_dict["paper"].size() == (6, 32)
 
 
 def test_hgt_conv_missing_dst_node_type():
     data = HeteroData()
-    data['author'].x = torch.randn(4, 16)
-    data['paper'].x = torch.randn(6, 32)
-    data['university'].x = torch.randn(10, 32)
+    data["author"].x = torch.randn(4, 16)
+    data["paper"].x = torch.randn(6, 32)
+    data["university"].x = torch.randn(10, 32)
 
-    data['author', 'paper'].edge_index = get_random_edge_index(4, 6, 20)
-    data['paper', 'author'].edge_index = get_random_edge_index(6, 4, 20)
-    data['university', 'author'].edge_index = get_random_edge_index(10, 4, 10)
+    data["author", "paper"].edge_index = get_random_edge_index(4, 6, 20)
+    data["paper", "author"].edge_index = get_random_edge_index(6, 4, 20)
+    data["university", "author"].edge_index = get_random_edge_index(10, 4, 10)
 
     conv = HGTConv(-1, 64, data.metadata(), heads=1)
 
     out_dict = conv(data.x_dict, data.edge_index_dict)
-    assert out_dict['author'].size() == (4, 64)
-    assert out_dict['paper'].size() == (6, 64)
-    assert 'university' not in out_dict
+    assert out_dict["author"].size() == (4, 64)
+    assert out_dict["paper"].size() == (6, 64)
+    assert "university" not in out_dict
 
 
 def test_hgt_conv_missing_input_node_type():
     data = HeteroData()
-    data['author'].x = torch.randn(4, 16)
-    data['paper'].x = torch.randn(6, 32)
-    data['author', 'writes',
-         'paper'].edge_index = get_random_edge_index(4, 6, 20)
+    data["author"].x = torch.randn(4, 16)
+    data["paper"].x = torch.randn(6, 32)
+    data["author", "writes", "paper"].edge_index = get_random_edge_index(4, 6, 20)
 
     # Some nodes from metadata are missing in data.
     # This might happen while using NeighborLoader.
-    metadata = (['author', 'paper',
-                 'university'], [('author', 'writes', 'paper')])
+    metadata = (["author", "paper", "university"], [("author", "writes", "paper")])
     conv = HGTConv(-1, 64, metadata, heads=1)
 
     out_dict = conv(data.x_dict, data.edge_index_dict)
-    assert out_dict['paper'].size() == (6, 64)
-    assert 'university' not in out_dict
+    assert out_dict["paper"].size() == (6, 64)
+    assert "university" not in out_dict
 
 
 def test_hgt_conv_missing_edge_type():
     data = HeteroData()
-    data['author'].x = torch.randn(4, 16)
-    data['paper'].x = torch.randn(6, 32)
-    data['university'].x = torch.randn(10, 32)
+    data["author"].x = torch.randn(4, 16)
+    data["paper"].x = torch.randn(6, 32)
+    data["university"].x = torch.randn(10, 32)
 
-    data['author', 'writes',
-         'paper'].edge_index = get_random_edge_index(4, 6, 20)
+    data["author", "writes", "paper"].edge_index = get_random_edge_index(4, 6, 20)
 
-    metadata = (['author', 'paper',
-                 'university'], [('author', 'writes', 'paper'),
-                                 ('university', 'employs', 'author')])
+    metadata = (
+        ["author", "paper", "university"],
+        [("author", "writes", "paper"), ("university", "employs", "author")],
+    )
     conv = HGTConv(-1, 64, metadata, heads=1)
 
     out_dict = conv(data.x_dict, data.edge_index_dict)
-    assert out_dict['author'].size() == (4, 64)
-    assert out_dict['paper'].size() == (6, 64)
-    assert 'university' not in out_dict
+    assert out_dict["author"].size() == (4, 64)
+    assert out_dict["paper"].size() == (6, 64)
+    assert "university" not in out_dict
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
 
     num_nodes, num_edges = 30_000, 300_000
     x_dict = {
-        'paper': torch.randn(num_nodes, 64, device=args.device),
-        'author': torch.randn(num_nodes, 64, device=args.device),
+        "paper": torch.randn(num_nodes, 64, device=args.device),
+        "author": torch.randn(num_nodes, 64, device=args.device),
     }
     edge_index_dict = {
-        ('paper', 'to', 'paper'):
-        torch.randint(num_nodes, (2, num_edges), device=args.device),
-        ('author', 'to', 'paper'):
-        torch.randint(num_nodes, (2, num_edges), device=args.device),
-        ('paper', 'to', 'author'):
-        torch.randint(num_nodes, (2, num_edges), device=args.device),
+        ("paper", "to", "paper"): torch.randint(
+            num_nodes, (2, num_edges), device=args.device
+        ),
+        ("author", "to", "paper"): torch.randint(
+            num_nodes, (2, num_edges), device=args.device
+        ),
+        ("paper", "to", "author"): torch.randint(
+            num_nodes, (2, num_edges), device=args.device
+        ),
     }
 
     conv = HGTConv(
@@ -268,7 +273,7 @@ if __name__ == '__main__':
     benchmark(
         funcs=[conv],
         args=(x_dict, edge_index_dict),
-        num_steps=10 if args.device == 'cpu' else 100,
-        num_warmups=5 if args.device == 'cpu' else 50,
+        num_steps=10 if args.device == "cpu" else 100,
+        num_warmups=5 if args.device == "cpu" else 50,
         backward=False,
     )

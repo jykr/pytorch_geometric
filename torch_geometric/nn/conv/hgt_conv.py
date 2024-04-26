@@ -10,9 +10,8 @@ from torch_geometric.nn.dense import HeteroDictLinear, HeteroLinear
 from torch_geometric.nn.inits import ones
 from torch_geometric.nn.parameter_dict import ParameterDict
 from torch_geometric.typing import Adj, EdgeType, Metadata, NodeType
-from torch_geometric.utils import softmax
+from torch_geometric.utils import softmax, is_sparse, is_torch_sparse_tensor
 from torch_geometric.utils.hetero import construct_bipartite_edge_index
-
 
 class HGTConv(MessagePassing):
     r"""The Heterogeneous Graph Transformer (HGT) operator from the
@@ -156,7 +155,9 @@ class HGTConv(MessagePassing):
     def forward(
         self,
         x_dict: Dict[NodeType, Tensor],
-        edge_index_dict: Dict[EdgeType, Adj]  # Support both.
+        edge_index_dict: Dict[EdgeType, Adj],  # Support both.
+        edge_weight_dict: Optional[Dict[EdgeType, Tensor]] = None,
+        edge_attr_dict: Optional[Dict[EdgeType, Tensor]] = None,
     ) -> Dict[NodeType, Optional[Tensor]]:
         r"""Runs the forward pass of the module.
 
@@ -174,6 +175,20 @@ class HGTConv(MessagePassing):
             In case a node type does not receive any message, its output will
             be set to :obj:`None`.
         """
+        print(f"edge index shape: {edge_index_dict}")
+        if edge_weight_dict is None:
+            edge_weight_dict = self.p_rel
+        if edge_attr_dict is None:
+            edge_attr_dict = {}
+            for k, v in edge_index_dict.items():
+                if is_sparse(v):
+                    if is_torch_sparse_tensor(v):
+                        edge_attr_dict[k] = torch.zeros((len(v.values()), 0))
+                    else:
+                        print(f"v: {v.storage.value()}, {v.storage._col}")
+                        edge_attr_dict[k] = torch.zeros((v.numel(), 0))
+                else:
+                    edge_attr_dict[k] = torch.zeros((v.shape[1], 0))
         F = self.out_channels
         H = self.heads
         D = F // H
@@ -191,12 +206,19 @@ class HGTConv(MessagePassing):
         q, dst_offset = self._cat(q_dict)
         k, v, src_offset = self._construct_src_node_feat(
             k_dict, v_dict, edge_index_dict)
-
-        edge_index, edge_attr = construct_bipartite_edge_index(
-            edge_index_dict, src_offset, dst_offset, edge_attr_dict=self.p_rel,
+        print(k.shape)
+        edge_index, edge_weight, edge_attr = construct_bipartite_edge_index(
+            edge_index_dict,
+            src_offset,
+            dst_offset,
+            edge_attr_dict = edge_attr_dict,
+            edge_weight_dict = edge_weight_dict,
             num_nodes=k.size(0))
-
-        out = self.propagate(edge_index, k=k, q=q, v=v, edge_attr=edge_attr)
+        #k.shape == q.shape == v.shape == (n_total_nodes, H, D)
+        if edge_attr_dict is not None:
+            out = self.propagate(edge_index, k=k, q=q, v=v, edge_weight=edge_weight, edge_attr=edge_attr)
+        else:
+            out = self.propagate(edge_index, k=k, q=q, v=v, edge_weight=edge_weight,)
 
         # Reconstruct output node embeddings dict:
         for node_type, start_offset in dst_offset.items():
@@ -222,10 +244,11 @@ class HGTConv(MessagePassing):
 
         return out_dict
 
-    def message(self, k_j: Tensor, q_i: Tensor, v_j: Tensor, edge_attr: Tensor,
+    def message(self, k_j: Tensor, q_i: Tensor, v_j: Tensor, edge_weight: Tensor, edge_attr: Tensor,
                 index: Tensor, ptr: Optional[Tensor],
                 size_i: Optional[int]) -> Tensor:
-        alpha = (q_i * k_j).sum(dim=-1) * edge_attr
+        print(f"q_i dimension:{q_i.shape}; k_j dimension:{k_j.shape}; edge_attr dimension:{edge_attr.shape}, edge_attr values:{edge_attr}; edge_weight dimension:{edge_weight.shape}, edge_weight values:{edge_weight};")
+        alpha = (q_i * k_j).sum(dim=-1) * edge_weight #edge_attr # dimension?
         alpha = alpha / math.sqrt(q_i.size(-1))
         alpha = softmax(alpha, index, ptr, size_i)
         out = v_j * alpha.view(-1, self.heads, 1)
