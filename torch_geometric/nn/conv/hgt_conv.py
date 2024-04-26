@@ -215,10 +215,7 @@ class HGTConv(MessagePassing):
             edge_weight_dict = edge_weight_dict,
             num_nodes=k.size(0))
         #k.shape == q.shape == v.shape == (n_total_nodes, H, D)
-        if edge_attr_dict is not None:
-            out = self.propagate(edge_index, k=k, q=q, v=v, edge_weight=edge_weight, edge_attr=edge_attr)
-        else:
-            out = self.propagate(edge_index, k=k, q=q, v=v, edge_weight=edge_weight,)
+        out = self.propagate(edge_index, k=k, q=q, v=v, edge_weight=edge_weight, edge_attr=edge_attr)
 
         # Reconstruct output node embeddings dict:
         for node_type, start_offset in dst_offset.items():
