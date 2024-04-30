@@ -263,8 +263,14 @@ class HGTConv(MessagePassing):
         alpha = alpha / math.sqrt(q_i.size(-1))
         alpha = softmax(alpha, index, ptr, size_i) * edge_weight
         out = v_j * alpha.view(-1, self.heads, 1)
+        
         print(f"out shape @ message: {out.shape}")
-        return out.view(-1, self.out_channels)
+        try:
+            out = out.view(-1, self.out_channels)
+        except RuntimeError as e:
+            print(f"out channels {self.out_channels}, out shape {out.shape}")
+            raise e
+        return out
 
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}(-1, {self.out_channels}, '
