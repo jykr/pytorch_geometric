@@ -175,7 +175,7 @@ class MessagePassing(torch.nn.Module):
                 if 'propagate' in self.__class__.__dict__:
                     raise ValueError("Cannot compile custom 'propagate' "
                                      "method")
-
+                print("dir:", root_dir)
                 module = module_from_template(
                     module_name=f'{jinja_prefix}_propagate',
                     template_path=osp.join(root_dir, 'propagate.jinja'),
@@ -536,7 +536,7 @@ class MessagePassing(torch.nn.Module):
         if fuse:
             coll_dict = self._collect(self._fused_user_args, edge_index,
                                       mutable_size, kwargs)
-
+            print(f"coll_dict:{coll_dict.keys()}")
             msg_aggr_kwargs = self.inspector.collect_param_data(
                 'message_and_aggregate', coll_dict)
             for hook in self._message_and_aggregate_forward_pre_hooks.values():
@@ -554,6 +554,7 @@ class MessagePassing(torch.nn.Module):
             out = self.update(out, **update_kwargs)
 
         else:  # Otherwise, run both functions in separation.
+            print(f"decomposed layers;{decomposed_layers}")
             if decomposed_layers > 1:
                 user_args = self._user_args
                 decomp_args = {a[:-2] for a in user_args if a[-2:] == '_j'}
@@ -570,9 +571,10 @@ class MessagePassing(torch.nn.Module):
 
                 coll_dict = self._collect(self._user_args, edge_index,
                                           mutable_size, kwargs)
-
+                print(f"coll_dict:{coll_dict.keys()}")
                 msg_kwargs = self.inspector.collect_param_data(
                     'message', coll_dict)
+                print(f"msg_kwargs:{msg_kwargs.keys()}")
                 for hook in self._message_forward_pre_hooks.values():
                     res = hook(self, (msg_kwargs, ))
                     if res is not None:

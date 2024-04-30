@@ -11,6 +11,7 @@ from torch.nn.parameter import Parameter
 
 import torch_geometric.backend
 import torch_geometric.typing
+from torch_geometric.typing import EdgeType, NodeType
 from torch_geometric import is_compiling
 from torch_geometric.nn import inits
 from torch_geometric.typing import pyg_lib
@@ -224,8 +225,8 @@ class HeteroLinear(torch.nn.Module):
     """
     def __init__(
         self,
-        in_channels: int,
-        out_channels: int,
+        in_channels: Union[int, Dict[Union[NodeType,EdgeType], int]],
+        out_channels: Union[int, Dict[Union[NodeType,EdgeType], int]],
         num_types: int,
         is_sorted: bool = False,
         **kwargs,

@@ -27,6 +27,7 @@ def module_from_template(
             suffix='.py',
             delete=False,
     ) as tmp:
+        print("tmpfile", tmp.name)
         tmp.write(module_repr)
         tmp.flush()
 

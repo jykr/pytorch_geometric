@@ -45,6 +45,7 @@ class HGTConv(MessagePassing):
         out_channels: int,
         metadata: Metadata,
         heads: int = 1,
+        edge_attribute_dims: Optional[Dict[EdgeType, int]] = None,
         **kwargs,
     ):
         super().__init__(aggr='add', node_dim=0, **kwargs)
@@ -76,10 +77,12 @@ class HGTConv(MessagePassing):
 
         dim = out_channels // heads
         num_types = heads * len(self.edge_types)
-
-        self.k_rel = HeteroLinear(dim, dim, num_types, bias=False,
+        attr_dim = 0
+        if edge_attribute_dims is not None:
+            attr_dim = max(edge_attribute_dims.values())
+        self.k_rel = HeteroLinear(dim + attr_dim, dim, num_types, bias=False,
                                   is_sorted=True)
-        self.v_rel = HeteroLinear(dim, dim, num_types, bias=False,
+        self.v_rel = HeteroLinear(dim + attr_dim, dim, num_types, bias=False,
                                   is_sorted=True)
 
         self.skip = ParameterDict({
@@ -117,15 +120,15 @@ class HGTConv(MessagePassing):
     def _construct_src_node_feat(
         self, k_dict: Dict[str, Tensor], v_dict: Dict[str, Tensor],
         edge_index_dict: Dict[EdgeType, Adj]
-    ) -> Tuple[Tensor, Tensor, Dict[EdgeType, int]]:
+    ) -> Tuple[Tensor, Tensor, Tensor, Dict[EdgeType, int]]:
         """Constructs the source node representations."""
         cumsum = 0
         num_edge_types = len(self.edge_types)
         H, D = self.heads, self.out_channels // self.heads
-
         # Flatten into a single tensor with shape [num_edge_types * heads, D]:
         ks: List[Tensor] = []
         vs: List[Tensor] = []
+        edge_attrs: List[Tensor] = []
         type_list: List[Tensor] = []
         offset: Dict[EdgeType] = {}
         for edge_type in edge_index_dict.keys():
@@ -142,15 +145,17 @@ class HGTConv(MessagePassing):
             type_list.append(type_vec)
             ks.append(k_dict[src])
             vs.append(v_dict[src])
-
+        print(f"ks dim: {[k.shape for k in ks]}")
         ks = torch.cat(ks, dim=0).transpose(0, 1).reshape(-1, D)
+        print(f"ks dim: {ks.shape}")
         vs = torch.cat(vs, dim=0).transpose(0, 1).reshape(-1, D)
-        type_vec = torch.cat(type_list, dim=1).flatten()
-
-        k = self.k_rel(ks, type_vec).view(H, -1, D).transpose(0, 1)
-        v = self.v_rel(vs, type_vec).view(H, -1, D).transpose(0, 1)
-
-        return k, v, offset
+        print(f"type list: {[t.shape for t in type_list]}")
+        print(f"type list: {type_list}")
+        type_vec = torch.cat(type_list, dim=1).transpose(0,1)
+        k = ks.view(H, -1, D).transpose(0, 1)
+        v = vs.view(H, -1, D).transpose(0, 1)
+        print(f"type_vec: {type_vec.shape}")
+        return k, v, type_vec, offset
 
     def forward(
         self,
@@ -204,9 +209,10 @@ class HGTConv(MessagePassing):
             v_dict[key] = v.view(-1, H, D)
 
         q, dst_offset = self._cat(q_dict)
-        k, v, src_offset = self._construct_src_node_feat(
-            k_dict, v_dict, edge_index_dict)
-        print(k.shape)
+        k, v, type_vec, src_offset = self._construct_src_node_feat(
+            k_dict, v_dict, edge_index_dict, )
+        print(f"k shape: {k.shape}")
+        print(f"type_vec shape @ forward: {type_vec.shape}")
         edge_index, edge_weight, edge_attr = construct_bipartite_edge_index(
             edge_index_dict,
             src_offset,
@@ -215,7 +221,7 @@ class HGTConv(MessagePassing):
             edge_weight_dict = edge_weight_dict,
             num_nodes=k.size(0))
         #k.shape == q.shape == v.shape == (n_total_nodes, H, D)
-        out = self.propagate(edge_index, k=k, q=q, v=v, edge_weight=edge_weight, edge_attr=edge_attr)
+        out = self.propagate(edge_index, k=k, q=q, v=v, edge_weight=edge_weight, edge_attr=edge_attr, edge_type=type_vec)
 
         # Reconstruct output node embeddings dict:
         for node_type, start_offset in dst_offset.items():
@@ -241,14 +247,23 @@ class HGTConv(MessagePassing):
 
         return out_dict
 
-    def message(self, k_j: Tensor, q_i: Tensor, v_j: Tensor, edge_weight: Tensor, edge_attr: Tensor,
+    def message(self, k_j: Tensor, q_i: Tensor, v_j: Tensor, edge_weight: Tensor, edge_attr: Tensor, edge_type_i: Tensor, edge_type_j: Tensor,
                 index: Tensor, ptr: Optional[Tensor],
                 size_i: Optional[int]) -> Tensor:
         print(f"q_i dimension:{q_i.shape}; k_j dimension:{k_j.shape}; edge_attr dimension:{edge_attr.shape}, edge_attr values:{edge_attr}; edge_weight dimension:{edge_weight.shape}, edge_weight values:{edge_weight};")
-        alpha = (q_i * k_j).sum(dim=-1) * edge_weight #edge_attr # dimension?
+        n_edges, H, D = q_i.shape
+        # edge_attr.shape == (n_edges, n_attr_dim)
+        # Input for the k_rel should be (n_samples, n_dim) and (n_samples,)
+        type_vec = edge_type_j
+        print(f"edge_attr shape @ message: {type_vec.shape}")
+        print(f"type_vec shape @ message: {type_vec.shape}")
+        k_j = self.k_rel(torch.cat([k_j, edge_attr.unsqueeze(1).expand(-1, H, -1)], axis=-1).view(-1, D), type_vec.flatten()).view(H, -1, D).transpose(0, 1)
+        v_j = self.v_rel(torch.cat([v_j, edge_attr.unsqueeze(1).expand(-1, H, -1)], axis=-1).view(-1, D), type_vec.flatten()).view(H, -1, D).transpose(0, 1)
+        alpha = (q_i * k_j).sum(dim=-1)# * edge_weight #edge_attr # dimension?
         alpha = alpha / math.sqrt(q_i.size(-1))
-        alpha = softmax(alpha, index, ptr, size_i)
+        alpha = softmax(alpha, index, ptr, size_i) * edge_weight
         out = v_j * alpha.view(-1, self.heads, 1)
+        print(f"out shape @ message: {out.shape}")
         return out.view(-1, self.out_channels)
 
     def __repr__(self) -> str:
