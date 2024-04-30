@@ -211,7 +211,6 @@ class HGTConv(MessagePassing):
         q, dst_offset = self._cat(q_dict)
         k, v, type_vec, src_offset = self._construct_src_node_feat(
             k_dict, v_dict, edge_index_dict, )
-        print(f"k shape: {k.shape}")
         print(f"type_vec shape @ forward: {type_vec.shape}")
         edge_index, edge_weight, edge_attr = construct_bipartite_edge_index(
             edge_index_dict,
@@ -220,6 +219,9 @@ class HGTConv(MessagePassing):
             edge_attr_dict = edge_attr_dict,
             edge_weight_dict = edge_weight_dict,
             num_nodes=k.size(0))
+        print(f"edge_index @forward: {edge_index}")
+        print(f"edge_attr @forward: {edge_attr}")
+        print(f"edge_weight @forward: {edge_weight}")
         #k.shape == q.shape == v.shape == (n_total_nodes, H, D)
         out = self.propagate(edge_index, k=k, q=q, v=v, edge_weight=edge_weight, edge_attr=edge_attr, edge_type=type_vec)
 
@@ -255,22 +257,17 @@ class HGTConv(MessagePassing):
         # edge_attr.shape == (n_edges, n_attr_dim)
         # Input for the k_rel should be (n_samples, n_dim) and (n_samples,)
         type_vec = edge_type_j
-        print(f"edge_attr shape @ message: {type_vec.shape}")
-        print(f"type_vec shape @ message: {type_vec.shape}")
+        print(f"type_vec @ message: {type_vec}")
+        #print(f"k_j @ message: {k_j}")
         k_j = self.k_rel(torch.cat([k_j, edge_attr.unsqueeze(1).expand(-1, H, -1)], axis=-1).view(-1, D), type_vec.flatten()).view(H, -1, D).transpose(0, 1)
+        print(f"edge_attr: {edge_attr}")
         v_j = self.v_rel(torch.cat([v_j, edge_attr.unsqueeze(1).expand(-1, H, -1)], axis=-1).view(-1, D), type_vec.flatten()).view(H, -1, D).transpose(0, 1)
         alpha = (q_i * k_j).sum(dim=-1)# * edge_weight #edge_attr # dimension?
         alpha = alpha / math.sqrt(q_i.size(-1))
+        
         alpha = softmax(alpha, index, ptr, size_i) * edge_weight
         out = v_j * alpha.view(-1, self.heads, 1)
-        
-        print(f"out shape @ message: {out.shape}")
-        try:
-            out = out.view(-1, self.out_channels)
-        except RuntimeError as e:
-            print(f"out channels {self.out_channels}, out shape {out.shape}")
-            raise e
-        return out
+        return out.reshape(-1, self.out_channels)
 
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}(-1, {self.out_channels}, '
