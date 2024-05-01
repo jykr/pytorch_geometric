@@ -111,6 +111,7 @@ def construct_bipartite_edge_index(
     is_sparse_tensor = False
     edge_indices: List[Tensor] = []
     edge_attrs: List[Tensor] = []
+    edge_types: List[Tensor] = []
     edge_weights: List[Tensor] = []
     attr_dim = max([v.size(1) for v in edge_attr_dict.values()])
     for edge_type, src_offset in src_offset_dict.items():
@@ -128,13 +129,14 @@ def construct_bipartite_edge_index(
         edge_index[0] += src_offset
         edge_index[1] += dst_offset
         edge_indices.append(edge_index)
-
+        print(f"edge_index.size: {edge_index.shape}")
         if edge_attr_dict is not None:
             if isinstance(edge_attr_dict, ParameterDict):
                 value = edge_attr_dict['__'.join(edge_type)]
             else:
                 value = edge_attr_dict[edge_type]
             if value.size(0) != edge_index.size(1):
+                print(f"value.size: {value.shape}")
                 value = value.expand(edge_index.size(1), -1)
             if value.size(1) != attr_dim:
                 value = torch.nn.functional.pad(value, (0, attr_dim - value.size(1)))
