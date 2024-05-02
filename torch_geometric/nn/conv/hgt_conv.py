@@ -81,9 +81,9 @@ class HGTConv(MessagePassing):
         if edge_attribute_dims is not None:
             self.attr_dim = max(edge_attribute_dims.values())
         self.k_rel = HeteroLinear(dim + self.attr_dim, dim, num_types, bias=False,
-                                  is_sorted=True)
+                                  is_sorted=False)
         self.v_rel = HeteroLinear(dim + self.attr_dim, dim, num_types, bias=False,
-                                  is_sorted=True)
+                                  is_sorted=False)
 
         self.skip = ParameterDict({
             node_type: Parameter(torch.empty(1))
@@ -146,16 +146,14 @@ class HGTConv(MessagePassing):
             ks.append(k_dict[src])
             vs.append(v_dict[src])
         print(f"ks dim: {[k.shape for k in ks]}")
-        ks = torch.cat(ks, dim=0).transpose(0, 1).reshape(-1, D)
+        ks = torch.cat(ks, dim=0)
         print(f"ks dim: {ks.shape}")
-        vs = torch.cat(vs, dim=0).transpose(0, 1).reshape(-1, D)
+        vs = torch.cat(vs, dim=0)
         print(f"type list: {[t.shape for t in type_list]}")
         print(f"type list: {type_list}")
-        type_vec = torch.cat(type_list, dim=1).transpose(0,1)
-        k = ks.view(H, -1, D).transpose(0, 1)
-        v = vs.view(H, -1, D).transpose(0, 1)
+        type_vec = torch.cat(type_list, dim=1).transpose(0, 1)
         print(f"type_vec @ construct: {type_vec}")
-        return k, v, type_vec, offset
+        return ks, vs, type_vec, offset
 
     def forward(
         self,
@@ -256,17 +254,18 @@ class HGTConv(MessagePassing):
         n_edges, H, D = q_i.shape
         # edge_attr.shape == (n_edges, n_attr_dim)
         # Input for the k_rel should be (n_samples, n_dim) and (n_samples,)
-        type_vec = edge_type_j
+        type_vec = edge_type_i
         print(f"edge_type_i @ message: {edge_type_i}")
         print(f"edge_type_j @ message: {edge_type_j}")
+        print(f"flattened edge_type_j @ message: {edge_type_j.flatten()}")
         print(f"k_j: {k_j}")
         #print(f"k_j @ message: {k_j}")
-        k_j = self.k_rel(torch.cat([k_j.transpose(0, 1).reshape(-1, D), edge_attr.unsqueeze(0).expand(H, -1, -1).view(n_edges*H, self.attr_dim)], axis=-1), type_vec.view(-1)).reshape(H, -1, D).transpose(0, 1)
-        v_j = self.v_rel(torch.cat([v_j.transpose(0, 1).reshape(-1, D), edge_attr.unsqueeze(0).expand(H, -1, -1).view(n_edges*H, self.attr_dim)], axis=-1), type_vec.view(-1)).reshape(H, -1, D).transpose(0, 1)
+        k_j = self.k_rel(torch.cat([k_j.transpose(0, 1).reshape(-1, D), edge_attr.unsqueeze(0).expand(H, -1, -1).reshape(n_edges * H, self.attr_dim)], axis=-1), type_vec.transpose(1, 0).flatten()).reshape(H, -1, D).transpose(0, 1)
+        v_j = self.v_rel(torch.cat([v_j.transpose(0, 1).reshape(-1, D), edge_attr.unsqueeze(0).expand(H, -1, -1).reshape(n_edges * H, self.attr_dim)], axis=-1), type_vec.transpose(1, 0).flatten()).reshape(H, -1, D).transpose(0, 1)
         alpha = (q_i * k_j).sum(dim=-1) # * edge_weight #edge_attr # dimension?
         alpha = alpha / math.sqrt(q_i.size(-1))
         
-        alpha = softmax(alpha, index, ptr, size_i) * edge_weight
+        alpha = softmax(alpha, index, ptr, size_i)# * edge_weight
         out = v_j * alpha.view(-1, self.heads, 1)
         return out.reshape(-1, self.out_channels)
 

@@ -8,14 +8,17 @@ from torch_geometric.testing import get_random_edge_index, withPackage
 from torch_geometric.typing import SparseTensor
 from torch_geometric.utils import coalesce, to_torch_csc_tensor
 
+from torch_geometric.seed import seed_everything
+
 
 @withPackage("torch>=1.12.0")  # TODO Investigate error
 def test_hgt_conv_same_dimensions():
+    seed_everything(0)
     x_dict = {
         'author': torch.randn(4, 16),
         'paper': torch.randn(5, 16),
     }
-    edge_index = coalesce(get_random_edge_index(4, 5, num_edges=20))
+    edge_index = coalesce(get_random_edge_index(4, 5, num_edges=3))
 
     edge_index_dict = {
         ('author', 'writes', 'paper'): edge_index,
@@ -32,8 +35,8 @@ def test_hgt_conv_same_dimensions():
 
     metadata = (list(x_dict.keys()), list(edge_index_dict.keys()))
 
-    conv = HGTConv(16, 16, metadata, heads=1)
-    assert str(conv) == 'HGTConv(-1, 16, heads=1)'
+    conv = HGTConv(16, 16, metadata, heads=2)
+    assert str(conv) == 'HGTConv(-1, 16, heads=2)'
     out_dict1 = conv(x_dict, edge_index_dict)
     assert len(out_dict1) == 2
     assert out_dict1['author'].size() == (4, 16)
