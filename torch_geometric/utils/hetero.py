@@ -131,6 +131,8 @@ def construct_bipartite_edge_index(
             else:
                 value = edge_attr_dict[edge_type]
             if value.size(0) != edge_index.size(1):
+                print(f"value: {value.size(0), value.size(1)}")
+                print(f"edge_index: {edge_index.size(0), edge_index.size(1)}")
                 value = value.expand(edge_index.size(1), -1)
             edge_attrs.append(value)
 
