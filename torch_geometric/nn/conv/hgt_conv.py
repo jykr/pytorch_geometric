@@ -193,11 +193,15 @@ class HGTConv(MessagePassing):
         k, v, src_offset = self._construct_src_node_feat(
             k_dict, v_dict, edge_index_dict)
 
+        if edge_attr_dict is None:
+            edge_attr_dict = self.p_rel
+        else:
+            edge_attr_dict = {edge_type: self.p_rel["__".join(edge_type)].expand(edge_attr.shape[0], -1)[:,:,None] * edge_attr[:,None,:] for edge_type, edge_attr in edge_attr_dict.items()}
+
         edge_index, edge_attr = construct_bipartite_edge_index(
             edge_index_dict, src_offset, dst_offset, edge_attr_dict=edge_attr_dict,#
             #edge_attr_dict=self.p_rel,
             num_nodes=k.size(0))
-
         out = self.propagate(edge_index, k=k, q=q, v=v, edge_attr=edge_attr)
 
         # Reconstruct output node embeddings dict:
@@ -227,6 +231,7 @@ class HGTConv(MessagePassing):
     def message(self, k_j: Tensor, q_i: Tensor, v_j: Tensor, edge_attr: Tensor,
                 index: Tensor, ptr: Optional[Tensor],
                 size_i: Optional[int]) -> Tensor:
+        if edge_attr.dim() > 2: edge_attr = edge_attr.sum(axis=-1)
         alpha = (q_i * k_j).sum(dim=-1) * edge_attr
         alpha = alpha / math.sqrt(q_i.size(-1))
         alpha = softmax(alpha, index, ptr, size_i)

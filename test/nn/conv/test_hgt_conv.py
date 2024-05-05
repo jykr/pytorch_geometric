@@ -16,15 +16,10 @@ def test_hgt_conv_same_dimensions():
         'paper': torch.randn(6, 16),
     }
     edge_index = coalesce(get_random_edge_index(4, 6, num_edges=20))
-    print(f"edge index shape?:{edge_index.shape}")
+
     edge_index_dict = {
         ('author', 'writes', 'paper'): edge_index,
-        ('paper', 'written_by', 'author'): edge_index[:,:5].flip([0])
-    }
-
-    edge_attr_dict = {
-        ('author', 'writes', 'paper'): torch.randn((edge_index.shape[1], 1)),
-        ('paper', 'written_by', 'author'): torch.randn((5, 1)),
+        ('paper', 'written_by', 'author'): edge_index.flip([0]),
     }
 
     adj_t_dict1 = {}
@@ -39,35 +34,31 @@ def test_hgt_conv_same_dimensions():
 
     conv = HGTConv(16, 16, metadata, heads=2)
     assert str(conv) == 'HGTConv(-1, 16, heads=2)'
-    out_dict1 = conv(x_dict, edge_index_dict, edge_attr_dict)
+    out_dict1 = conv(x_dict, edge_index_dict)
     assert len(out_dict1) == 2
     assert out_dict1['author'].size() == (4, 16)
     assert out_dict1['paper'].size() == (6, 16)
 
-    #out_dict2 = conv(x_dict, adj_t_dict1)
-    out_dict2 = conv(x_dict, adj_t_dict1, edge_attr_dict)
+    out_dict2 = conv(x_dict, adj_t_dict1)
     assert len(out_dict1) == len(out_dict2)
-    # for key in out_dict1.keys():
-    #     assert torch.allclose(out_dict1[key], out_dict2[key], atol=1e-6)
+    for key in out_dict1.keys():
+        assert torch.allclose(out_dict1[key], out_dict2[key], atol=1e-6)
 
     if torch_geometric.typing.WITH_TORCH_SPARSE:
         adj_t_dict2 = {}
         for edge_type, edge_index in edge_index_dict.items():
-            print(edge_type, adj_t_dict1[edge_type].size())
-            print(edge_type, adj_t_dict1[edge_type].size()[::-1])
             adj_t_dict2[edge_type] = SparseTensor.from_edge_index(
                 edge_index,
                 sparse_sizes=adj_t_dict1[edge_type].size()[::-1],
             ).t()
-            print(f"SparseTensor shape: {adj_t_dict2[edge_type].storage.sparse_sizes()}")
-        #out_dict3 = conv(x_dict, adj_t_dict2)
-        out_dict3 = conv(x_dict, adj_t_dict2, edge_attr_dict)
-        assert len(out_dict2) == len(out_dict3)
-        for key in out_dict2.keys():
-            assert torch.allclose(out_dict2[key], out_dict3[key], atol=1e-6)
+        out_dict3 = conv(x_dict, adj_t_dict2)
+        assert len(out_dict1) == len(out_dict3)
+        for key in out_dict1.keys():
+            assert torch.allclose(out_dict1[key], out_dict3[key], atol=1e-6)
 
     # TODO: Test JIT functionality. We need to wait on this one until PyTorch
     # allows indexing `ParameterDict` mappings :(
+
 
 
 @withPackage('torch>=1.12.0')  # TODO Investigate error
@@ -246,6 +237,56 @@ def test_hgt_conv_missing_edge_type():
     assert out_dict['paper'].size() == (6, 64)
     assert 'university' not in out_dict
 
+@withPackage('torch>=1.12.0')  # TODO Investigate error
+def test_hgt_conv_edge_attribute():
+    x_dict = {
+        'author': torch.randn(4, 16),
+        'paper': torch.randn(6, 16),
+    }
+    edge_index = coalesce(get_random_edge_index(4, 6, num_edges=20))
+    edge_index_dict = {
+        ('author', 'writes', 'paper'): edge_index,
+        ('paper', 'written_by', 'author'): edge_index[:,:3].flip([0])
+    }
+
+    edge_attr_dict = {
+        ('author', 'writes', 'paper'): torch.randn((edge_index.shape[1], 2)),
+        ('paper', 'written_by', 'author'): torch.randn((3, 2)),
+    }
+
+    # csc tensor doesn't support >1-dimensional attribute, skipping. (see https://github.com/pytorch/pytorch/issues/9674)
+    adj_t_dict1 = {}
+    for edge_type, edge_index in edge_index_dict.items():
+        src_type, _, dst_type = edge_type
+        adj_t_dict1[edge_type] = to_torch_csc_tensor(
+            edge_index,
+            size=(x_dict[src_type].size(0), x_dict[dst_type].size(0)),
+        ).t()
+
+    metadata = (list(x_dict.keys()), list(edge_index_dict.keys()))
+
+    conv = HGTConv(16, 16, metadata, heads=2)
+    assert str(conv) == 'HGTConv(-1, 16, heads=2)'
+    out_dict1 = conv(x_dict, edge_index_dict, edge_attr_dict)
+    assert len(out_dict1) == 2
+    assert out_dict1['author'].size() == (4, 16)
+    assert out_dict1['paper'].size() == (6, 16)
+    if torch_geometric.typing.WITH_TORCH_SPARSE:
+        adj_t_dict2 = {}
+        for edge_type, edge_index in edge_index_dict.items():
+            adj_t_dict2[edge_type] = SparseTensor.from_edge_index(
+                edge_index,
+                sparse_sizes=adj_t_dict1[edge_type].size()[::-1],
+                edge_attr=edge_attr_dict[edge_type]
+            ).t()
+        out_dict3 = conv(x_dict, adj_t_dict2)
+        assert len(out_dict1) == len(out_dict3)
+        for key in out_dict1.keys():
+            assert torch.allclose(out_dict1[key], out_dict3[key], atol=1e-6)
+
+    # TODO: Test JIT functionality. We need to wait on this one until PyTorch
+    # allows indexing `ParameterDict` mappings :(
+    
 
 if __name__ == '__main__':
     import argparse

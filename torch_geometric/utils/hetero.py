@@ -116,32 +116,42 @@ def construct_bipartite_edge_index(
         # TODO Add support for SparseTensor w/o converting.
         is_sparse_tensor = isinstance(edge_index, SparseTensor)
         if is_sparse(edge_index):
-            edge_index, _ = to_edge_index(edge_index)
+            edge_index, edge_attr = to_edge_index(edge_index)
+            if edge_attr.dim() == 1: edge_attr = edge_attr.unsqueeze(-1)
             edge_index = edge_index.flip([0])
+            if is_sparse_tensor:
+                if edge_attr_dict is not None:
+                    if isinstance(edge_attr_dict, ParameterDict):
+                        value = edge_attr_dict['__'.join(edge_type)]
+                    else:
+                        value = edge_attr_dict[edge_type]
+                    if value.size(0) != edge_index.size(1):
+                        value = value.expand(edge_index.size(1), -1)
+                    edge_attrs.append(value[:,:,None] * edge_attr[:,None,:])
+                else: 
+                    edge_attrs.append(edge_attr)
         else:
             edge_index = edge_index.clone()
-
         edge_index[0] += src_offset
         edge_index[1] += dst_offset
         edge_indices.append(edge_index)
 
-        if edge_attr_dict is not None:
+        if edge_attr_dict is not None and not is_sparse_tensor:
             if isinstance(edge_attr_dict, ParameterDict):
                 value = edge_attr_dict['__'.join(edge_type)]
             else:
                 value = edge_attr_dict[edge_type]
             if value.size(0) != edge_index.size(1):
-                print(f"value: {value.size(0), value.size(1)}")
-                print(f"edge_index: {edge_index.size(0), edge_index.size(1)}")
                 value = value.expand(edge_index.size(1), -1)
             edge_attrs.append(value)
+        
 
     edge_index = torch.cat(edge_indices, dim=1)
 
     edge_attr: Optional[Tensor] = None
-    if edge_attr_dict is not None:
+    
+    if edge_attrs:
         edge_attr = torch.cat(edge_attrs, dim=0)
-
     if is_sparse_tensor:
         edge_index = SparseTensor(
             row=edge_index[1],
@@ -149,5 +159,6 @@ def construct_bipartite_edge_index(
             value=edge_attr,
             sparse_sizes=(num_nodes, num_nodes),
         )
+        edge_attr = edge_index.storage.value()
 
     return edge_index, edge_attr
