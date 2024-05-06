@@ -46,6 +46,7 @@ class HGTConv(MessagePassing):
         out_channels: int,
         metadata: Metadata,
         heads: int = 1,
+        edge_attr_dims: Optional[Dict[EdgeType, int]] = None,
         **kwargs,
     ):
         super().__init__(aggr='add', node_dim=0, **kwargs)
@@ -78,10 +79,13 @@ class HGTConv(MessagePassing):
         dim = out_channels // heads
         num_types = heads * len(self.edge_types)
 
-        self.k_rel = HeteroLinear(dim, dim, num_types, bias=False,
-                                  is_sorted=True)
-        self.v_rel = HeteroLinear(dim, dim, num_types, bias=False,
-                                  is_sorted=True)
+        self.attr_dim = 1
+        if edge_attr_dims is not None:
+            self.attr_dim = max(edge_attr_dims.values())
+        self.k_rel = HeteroLinear(dim + self.attr_dim, dim, num_types, bias=False,
+                                  is_sorted=False)
+        self.v_rel = HeteroLinear(dim + self.attr_dim, dim, num_types, bias=False,
+                                  is_sorted=False)
 
         self.skip = ParameterDict({
             node_type: Parameter(torch.empty(1))
@@ -118,7 +122,7 @@ class HGTConv(MessagePassing):
     def _construct_src_node_feat(
         self, k_dict: Dict[str, Tensor], v_dict: Dict[str, Tensor],
         edge_index_dict: Dict[EdgeType, Adj]
-    ) -> Tuple[Tensor, Tensor, Dict[EdgeType, int]]:
+    ) -> Tuple[Tensor, Tensor, Tensor, Dict[EdgeType, int]]:
         """Constructs the source node representations."""
         cumsum = 0
         num_edge_types = len(self.edge_types)
@@ -144,14 +148,11 @@ class HGTConv(MessagePassing):
             ks.append(k_dict[src])
             vs.append(v_dict[src])
 
-        ks = torch.cat(ks, dim=0).transpose(0, 1).reshape(-1, D)
-        vs = torch.cat(vs, dim=0).transpose(0, 1).reshape(-1, D)
-        type_vec = torch.cat(type_list, dim=1).flatten()
+        ks = torch.cat(ks, dim=0)
+        vs = torch.cat(vs, dim=0)
+        type_vec = torch.cat(type_list, dim=1).transpose(0, 1)
 
-        k = self.k_rel(ks, type_vec).view(H, -1, D).transpose(0, 1)
-        v = self.v_rel(vs, type_vec).view(H, -1, D).transpose(0, 1)
-
-        return k, v, offset
+        return ks, vs, type_vec, offset
 
     def forward(
         self,
@@ -190,7 +191,7 @@ class HGTConv(MessagePassing):
             v_dict[key] = v.view(-1, H, D)
 
         q, dst_offset = self._cat(q_dict)
-        k, v, src_offset = self._construct_src_node_feat(
+        k, v, type_vec, src_offset = self._construct_src_node_feat(
             k_dict, v_dict, edge_index_dict)
 
         if edge_attr_dict is None:
@@ -201,8 +202,9 @@ class HGTConv(MessagePassing):
         edge_index, edge_attr = construct_bipartite_edge_index(
             edge_index_dict, src_offset, dst_offset, edge_attr_dict=edge_attr_dict,#
             #edge_attr_dict=self.p_rel,
-            num_nodes=k.size(0))
-        out = self.propagate(edge_index, k=k, q=q, v=v, edge_attr=edge_attr)
+            num_nodes=k.size(0),
+            attr_dim=(H, self.attr_dim))
+        out = self.propagate(edge_index, k=k, q=q, v=v, edge_attr=edge_attr, _edge_type=type_vec)
 
         # Reconstruct output node embeddings dict:
         for node_type, start_offset in dst_offset.items():
@@ -230,13 +232,21 @@ class HGTConv(MessagePassing):
 
     def message(self, k_j: Tensor, q_i: Tensor, v_j: Tensor, edge_attr: Tensor,
                 index: Tensor, ptr: Optional[Tensor],
-                size_i: Optional[int]) -> Tensor:
-        if edge_attr.dim() > 2: edge_attr = edge_attr.sum(axis=-1)
-        alpha = (q_i * k_j).sum(dim=-1) * edge_attr
+                size_i: Optional[int], _edge_type_j: Tensor) -> Tensor:
+        n_edges, H, D = q_i.shape
+        type_vec = _edge_type_j
+        if edge_attr.dim() == 2: edge_attr = edge_attr.unsqueeze(-1)
+        k_j_with_attr = torch.cat([k_j.transpose(0, 1), edge_attr.transpose(0, 1)], axis=-1)
+        v_j_with_attr = torch.cat([v_j.transpose(0, 1), edge_attr.transpose(0, 1)], axis=-1)
+
+        k_j = self.k_rel(k_j_with_attr.reshape(-1, D + self.attr_dim), type_vec.transpose(1, 0).flatten()).reshape(H, -1, D).transpose(0, 1)
+        v_j = self.v_rel(v_j_with_attr.reshape(-1, D + self.attr_dim), type_vec.transpose(1, 0).flatten()).reshape(H, -1, D).transpose(0, 1)
+        
+        alpha = (q_i * k_j).sum(dim=-1)
         alpha = alpha / math.sqrt(q_i.size(-1))
         alpha = softmax(alpha, index, ptr, size_i)
         out = v_j * alpha.view(-1, self.heads, 1)
-        return out.view(-1, self.out_channels)
+        return out.reshape(-1, self.out_channels)
 
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}(-1, {self.out_channels}, '

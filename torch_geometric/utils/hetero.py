@@ -85,6 +85,7 @@ def construct_bipartite_edge_index(
     dst_offset_dict: Dict[NodeType, int],
     edge_attr_dict: Optional[Dict[EdgeType, Tensor]] = None,
     num_nodes: Optional[int] = None,
+    attr_dim: Tuple[int] = (1, 1),
 ) -> Tuple[Adj, Optional[Tensor]]:
     """Constructs a tensor of edge indices by concatenating edge indices
     for each edge type. The edge indices are increased by the offset of the
@@ -109,6 +110,7 @@ def construct_bipartite_edge_index(
     is_sparse_tensor = False
     edge_indices: List[Tensor] = []
     edge_attrs: List[Tensor] = []
+    H, attr_dim = attr_dim
     for edge_type, src_offset in src_offset_dict.items():
         edge_index = edge_index_dict[edge_type]
         dst_offset = dst_offset_dict[edge_type[-1]]
@@ -117,10 +119,13 @@ def construct_bipartite_edge_index(
         is_sparse_tensor = isinstance(edge_index, SparseTensor)
         if is_sparse(edge_index):
             edge_index, edge_attr = to_edge_index(edge_index)
-            if edge_attr.dim() == 1: edge_attr = edge_attr.unsqueeze(-1)
+            if edge_attr.dim() == 1: 
+                edge_attr = edge_attr.unsqueeze(-1)
             edge_index = edge_index.flip([0])
             if is_sparse_tensor:
                 if edge_attr_dict is not None:
+                    if edge_attr.size(1) != attr_dim:
+                        edge_attr = torch.nn.functional.pad(edge_attr, (0, attr_dim - edge_attr.size(1)))
                     if isinstance(edge_attr_dict, ParameterDict):
                         value = edge_attr_dict['__'.join(edge_type)]
                     else:
@@ -129,7 +134,7 @@ def construct_bipartite_edge_index(
                         value = value.expand(edge_index.size(1), -1)
                     edge_attrs.append(value[:,:,None] * edge_attr[:,None,:])
                 else: 
-                    edge_attrs.append(edge_attr)
+                    edge_attrs.append(edge_attr.unsqueeze(1).expand(H))
         else:
             edge_index = edge_index.clone()
         edge_index[0] += src_offset
@@ -141,8 +146,12 @@ def construct_bipartite_edge_index(
                 value = edge_attr_dict['__'.join(edge_type)]
             else:
                 value = edge_attr_dict[edge_type]
+            if value.dim() == 1: value = value.unsqueeze(0).unsqueeze(1).expand(1, H, -1)
+            if value.dim() == 2: value = value.unsqueeze(1).expand(-1, H, -1)
+            if value.size(2) != attr_dim:
+                value = torch.nn.functional.pad(value, (0, attr_dim - value.size(1)))
             if value.size(0) != edge_index.size(1):
-                value = value.expand(edge_index.size(1), -1)
+                value = value.expand(edge_index.size(1), -1, -1)
             edge_attrs.append(value)
         
 
@@ -160,5 +169,4 @@ def construct_bipartite_edge_index(
             sparse_sizes=(num_nodes, num_nodes),
         )
         edge_attr = edge_index.storage.value()
-
     return edge_index, edge_attr

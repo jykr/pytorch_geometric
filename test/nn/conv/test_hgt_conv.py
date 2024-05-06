@@ -254,6 +254,8 @@ def test_hgt_conv_edge_attribute():
         ('paper', 'written_by', 'author'): torch.randn((3, 2)),
     }
 
+    edge_attr_dims = {edge_type:edge_attr.shape[1] for edge_type, edge_attr in edge_attr_dict.items()}
+
     # csc tensor doesn't support >1-dimensional attribute, skipping. (see https://github.com/pytorch/pytorch/issues/9674)
     adj_t_dict1 = {}
     for edge_type, edge_index in edge_index_dict.items():
@@ -265,7 +267,7 @@ def test_hgt_conv_edge_attribute():
 
     metadata = (list(x_dict.keys()), list(edge_index_dict.keys()))
 
-    conv = HGTConv(16, 16, metadata, heads=2)
+    conv = HGTConv(16, 16, metadata, heads=2, edge_attr_dims = edge_attr_dims)
     assert str(conv) == 'HGTConv(-1, 16, heads=2)'
     out_dict1 = conv(x_dict, edge_index_dict, edge_attr_dict)
     assert len(out_dict1) == 2
