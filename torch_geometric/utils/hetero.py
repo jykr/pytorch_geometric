@@ -129,10 +129,11 @@ def construct_bipartite_edge_index(
                     if isinstance(edge_attr_dict, ParameterDict):
                         value = edge_attr_dict['__'.join(edge_type)]
                     else:
-                        value = edge_attr_dict[edge_type]
+                        value = edge_attr_dict #p_rel[edge_type]
                     if value.size(0) != edge_index.size(1):
                         value = value.expand(edge_index.size(1), -1)
-                    edge_attrs.append(value[:,:,None] * edge_attr[:,None,:])
+                    
+                    edge_attrs.append(value[:,:,None] * edge_attr[:,None,:].to(value.device))
                 else: 
                     edge_attrs.append(edge_attr.unsqueeze(1).expand(H))
         else:
@@ -155,18 +156,20 @@ def construct_bipartite_edge_index(
             edge_attrs.append(value)
         
 
-    edge_index = torch.cat(edge_indices, dim=1)
+    edge_index = torch.cat(edge_indices, dim=1) #cpu
 
     edge_attr: Optional[Tensor] = None
     
     if edge_attrs:
-        edge_attr = torch.cat(edge_attrs, dim=0)
+        edge_attr = torch.cat(edge_attrs, dim=0) #cuda
+        edge_index = edge_index.to(edge_attr.device) 
+
     if is_sparse_tensor:
         edge_index = SparseTensor(
             row=edge_index[1],
             col=edge_index[0],
             value=edge_attr,
-            sparse_sizes=(num_nodes, num_nodes),
+            sparse_sizes=(num_nodes[1], num_nodes[0]),
         )
         edge_attr = edge_index.storage.value()
     return edge_index, edge_attr

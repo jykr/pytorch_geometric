@@ -150,7 +150,7 @@ class HGTConv(MessagePassing):
 
         ks = torch.cat(ks, dim=0)
         vs = torch.cat(vs, dim=0)
-        type_vec = torch.cat(type_list, dim=1).transpose(0, 1)
+        type_vec = torch.cat(type_list, dim=1).transpose(0, 1).to(ks.device)
 
         return ks, vs, type_vec, offset
 
@@ -198,11 +198,10 @@ class HGTConv(MessagePassing):
             edge_attr_dict = self.p_rel
         else:
             edge_attr_dict = {edge_type: self.p_rel["__".join(edge_type)].expand(edge_attr.shape[0], -1)[:,:,None] * edge_attr[:,None,:] for edge_type, edge_attr in edge_attr_dict.items()}
-
         edge_index, edge_attr = construct_bipartite_edge_index(
             edge_index_dict, src_offset, dst_offset, edge_attr_dict=edge_attr_dict,#
             #edge_attr_dict=self.p_rel,
-            num_nodes=k.size(0),
+            num_nodes=(k.size(0), q.size(0)),
             attr_dim=(H, self.attr_dim))
         out = self.propagate(edge_index, k=k, q=q, v=v, edge_attr=edge_attr, _edge_type=type_vec)
 

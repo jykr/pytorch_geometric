@@ -30,9 +30,10 @@ class ToUndirected(BaseTransform):
             :class:`~torch_geometric.data.HeteroData` graph data.
             (default: :obj:`True`)
     """
-    def __init__(self, reduce: str = "add", merge: bool = True):
+    def __init__(self, reduce: str = "add", merge: bool = True, keep: bool = False,):
         self.reduce = reduce
         self.merge = merge
+        self.keep = keep
 
     def forward(
         self,
@@ -57,7 +58,7 @@ class ToUndirected(BaseTransform):
                 for key, value in store.items():
                     if key == 'edge_index':
                         continue
-                    if isinstance(value, Tensor) and value.size(0) == nnz:
+                    if self.keep or (isinstance(value, Tensor) and value.size(0) == nnz):
                         inv_store[key] = value
 
             else:

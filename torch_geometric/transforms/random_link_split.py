@@ -9,7 +9,7 @@ from torch_geometric.data import Data, HeteroData
 from torch_geometric.data.datapipes import functional_transform
 from torch_geometric.data.storage import EdgeStorage
 from torch_geometric.transforms import BaseTransform
-from torch_geometric.typing import EdgeType
+from torch_geometric.typing import EdgeType, SparseTensor
 from torch_geometric.utils import negative_sampling
 
 
@@ -186,7 +186,10 @@ class RandomLinkSplit(BaseTransform):
                 perm = mask.nonzero(as_tuple=False).view(-1)
                 perm = perm[torch.randperm(perm.size(0), device=perm.device)]
             else:
-                device = edge_index.device
+                if isinstance(edge_index, SparseTensor): 
+                    device = edge_index.device()
+                else: 
+                    device = edge_index.device
                 perm = torch.randperm(edge_index.size(1), device=device)
 
             num_val = self.num_val
